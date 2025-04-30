@@ -110,3 +110,20 @@ def make_prompt(indexes, indexToSummarize):
 
 oneShotPrompt = make_prompt(indexes=[3], indexToSummarize=20) # indexes is just one! this is for ONE shot prompt
 fewShotPrompt = make_prompt(indexes=range(5), indexToSummarize=20)
+
+# Recommendation: test up to 5 shots, more than that it's just not helping the model. The model might not be adecuate.
+
+# In case we want to finetune the model.
+# i.e.:
+generationConfig = GenerationConfig(max_new_tokens=50,
+                                    do_sample=True,
+                                    temperature=0.1)
+
+inputs = tokenizer(fewShotPrompt, return_tensors='pt')
+output = tokenizer.decode(
+    model.generate(
+        inputs['input_ids'],
+        generation_config= generationConfig
+    )[0],
+    skip_special_tokens=True
+)
