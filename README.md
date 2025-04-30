@@ -1,5 +1,7 @@
 This repository is mererly educational.
-I am attending the course: *GENERATIVE AI WITH LARGE LANGUAGE MODELS*,
+
+I am attending the course:
+**GENERATIVE AI WITH LARGE LANGUAGE MODELS**,
 by AWS and DeepLearning.AI
 
 https://www.coursera.org/learn/generative-ai-with-llms

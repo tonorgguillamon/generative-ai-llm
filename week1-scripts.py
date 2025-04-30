@@ -105,7 +105,6 @@ def make_prompt(indexes, indexToSummarize):
     Dialogue:
     {dialogue}
     What was going on?
-    {summary}
     """
     return prompt
 
