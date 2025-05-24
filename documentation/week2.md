@@ -69,12 +69,12 @@ Thus, fine-tuning is a great alternative!
     
 Frozen weights for the LLM base model. Trainable layers and some other components are added. This makes the model more managable in terms of memory and computer power. Moreover, it's less prone to catastrophic forgetting.
 
-Full fine-tuning creates a full copy of orginal LLM per task: it reduces space and is flexible
+* Full fine-tuning creates a full copy of orginal LLM per task: it reduces space and is flexible
     - QA fine tune
     - Summarize fine tune
     - Generate fine tune
 
-PEFT methods:
+* PEFT methods:
     - Selective: select subset of initial LLM parameters to fine-tune.
     - Reparameterization: reparameterize model weights using a low-rank representation.
         LoRA -> in between the Embeddings and the self-attention there is the weights applied to embedding vectors.
@@ -94,7 +94,6 @@ PEFT methods:
             The analogy can be a matrix compression: two smaller images whose product reconstruct the original.
             The matrices A and B contain an approximation of the full matrix. So you train this lighter approximation.
             A lot of rows and columns in a big matriz are correlated. Much of the "true-sigal" lives in a low dimensional subspace.
-
     - Additive: add trainable layers or parameters to model. Adapters -> add a layer in Encoder or in Dsecoder, usually after the attention layer. Soft Prompts -> keeps architecture fixed, and plays with the input.
 
         Prompt tuning is NOT prompt engineering!
