@@ -99,7 +99,11 @@ def tokenize_function(element):
     element['labels'] = tokenizer(element["summary"], padding="max_length", truncation=True, return_tensors="pt").input_ids
     
     return element
- 
+
+# The Hugging Face Trainer expects the training dataset to have certain standard field names:
+# "input_ids": the tokenized input for the model.
+# "labels": the expected output (target) tokens for supervised learning tasks like sequence-to-sequence (seq2seq).
+ # Internally would be like: model(input_ids=batch["input_ids"], labels=batch["labels"])
 
 # The dataset actually contains 3 diff splits: train, validation, test.
 # The tokenize_function code is handling all data across all splits in batches.
@@ -122,3 +126,43 @@ print(f"Test: {tokenized_datasets['test'].shape}")
 print(tokenized_datasets)
 
 # 2. Fine-tune with preprocessed dataset
+# Doc for trainer
+# https://huggingface.co/docs/transformers/main_classes/trainer
+
+output_dir = f'./dialogue-summary-training-{str(int(time.time()))}'
+
+training_args = TrainingArguments(
+    output_dir=output_dir,
+    learning_rate=1e-5,
+    num_train_epochs=1,
+    weight_decay=0.01,
+    logging_steps=1,
+    max_steps=1
+)
+
+trainer = Trainer( # Hugging Face Trainer is used here to fine-tune (retrain) a pretrained model on your specific dataset
+    model=original_model,
+    args=training_args,
+    train_dataset=tokenized_datasets['train'],
+    eval_dataset=tokenized_datasets['validation']
+)
+
+trainer.train() # this might take few hours...
+
+trainer.save_model("fine-tuned-model-lab2")
+
+# to use the model:
+model = AutoModelForSeq2SeqLM.from_pretrained("fine-tuned-model-lab2")
+tokenizer = AutoTokenizer.from_pretrained("fine-tuned-model-lab2")
+
+dialogue = "Chris: Hi, how are you?\nAntje: I'm good, thanks! How about you?"
+prompt = f"Summarize the following conversation.\n\n{dialogue}\n\nSummary:"
+inputs = tokenizer(prompt, return_tensors="pt")
+outputs = model.generate(inputs["input_ids"], max_new_tokens=100)
+summary = tokenizer.decode(outputs[0], skip_special_tokens=True)
+print(summary)
+
+# 3. Evaluate the Model Qualitatively - ROUGE Metric
+rouge = evaluate.load('rouge')
+
+
