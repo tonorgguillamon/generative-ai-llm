@@ -97,4 +97,5 @@ Frozen weights for the LLM base model. Trainable layers and some other component
     - Additive: add trainable layers or parameters to model. Adapters -> add a layer in Encoder or in Dsecoder, usually after the attention layer. Soft Prompts -> keeps architecture fixed, and plays with the input.
 
         Prompt tuning is NOT prompt engineering!
+        Prompt tuning adds trainable "soft prompt" to inputs. With the same length as token vectors.
     
