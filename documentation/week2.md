@@ -11,6 +11,7 @@ Thus, fine-tuning is a great alternative!
 
     pre-trained LLM -> trask-spefici examples -> fine-tuned LLM
 
+    ```
     More examples:
         Summarize the following text:
             [EXAMPLE TEXT]
@@ -19,16 +20,15 @@ Thus, fine-tuning is a great alternative!
         Translate this sentence to:
             [EXAMPLE TEXT]
             [EXAMPLE COMPLETION]
-
+    ```
     Nonetheless, you must be carefull with memory usage!
 
 * Fine-tuning on a single-task -> we could incurre into catastrophic forgetting!
     To avoid this:
-        - fine-tune on multiple tasks at the same time
-            requires many examples of each need for training
-                Use FLAN family of models (Fine-tuned LAnguage Net): refer to a specific set of instructions used to perform instruction for fine-tuning (i.e. FLAN-T5, FLAN-PALM).
-
-        - consider Parameter Efficient Fine-tuning (PEFT)
+    - fine-tune on multiple tasks at the same time
+        requires many examples of each need for training
+            Use FLAN family of models (Fine-tuned LAnguage Net): refer to a specific set of instructions used to perform instruction for fine-tuning (i.e. FLAN-T5, FLAN-PALM).
+    - consider Parameter Efficient Fine-tuning (PEFT)
 
 * Model evaluation: metrics
     - ROUGE: for text summarization, compares a summary to one or more reference summaries.
@@ -48,7 +48,7 @@ Thus, fine-tuning is a great alternative!
             reference        -> It is cold outside (4 unigrams)
             generated output -> It is very cold outside (5 unigrams)
 
-            In this case LCS is "It is" and "cold outside", each with a length of 2.
+        In this case LCS is "It is" and "cold outside", each with a length of 2.
 
         > ROUGE-L Recall = LCS(Gen, Ref) / unigrams in reference --> in the example: 2 / 4 = 0.5
         > ROUGE-L Precision = LCS(Gen, Ref) / unigrams in output --> 2 / 5 = 0.4
@@ -61,11 +61,41 @@ Thus, fine-tuning is a great alternative!
 
     
     - Benchmarks for massive models:
-        . Massive Multitask Language Understanding (MMLU)
-        . BIG-bench Hard
-        . Holistic Evalution of Language Models (HELM)
+        - Massive Multitask Language Understanding (MMLU)
+        - BIG-bench Hard
+        - Holistic Evalution of Language Models (HELM)
 
 # Parameter efficient fine-tuning (PEFT)
+    
+Frozen weights for the LLM base model. Trainable layers and some other components are added. This makes the model more managable in terms of memory and computer power. Moreover, it's less prone to catastrophic forgetting.
 
+Full fine-tuning creates a full copy of orginal LLM per task: it reduces space and is flexible
+    - QA fine tune
+    - Summarize fine tune
+    - Generate fine tune
 
+PEFT methods:
+    - Selective: select subset of initial LLM parameters to fine-tune.
+    - Reparameterization: reparameterize model weights using a low-rank representation.
+        LoRA -> in between the Embeddings and the self-attention there is the weights applied to embedding vectors.
+            In there, you inject 2 rank decomposition matrices (small dimensions, typically 4, 8, ..., 64). Multiply the low rank matrices. It creates a matrix with the same dimension as the frozen weights. Then, sum this to the original weights.
+
+            i.e. presented in the original paper "Attention is all you need":
+                transformer weights hve dimensions d x k = 512 x 64
+                this means that each weights matrix has 32768 trainable parameters.
+
+                now, if we use LoRA with rank r = 8,
+                so this means that matrix A will have dimensions r x k = 8 x 64 = 512 parameters.
+                and matrix B will have dimensions d x r = 512 x 8 = 4096 trainable parameters.
+                this is a 86% reduction in parameters to train!
+
+            Hence, you can train different rank decomposition matrices for different tasks, and just inject them.
+
+            The analogy can be a matrix compression: two smaller images whose product reconstruct the original.
+            The matrices A and B contain an approximation of the full matrix. So you train this lighter approximation.
+            A lot of rows and columns in a big matriz are correlated. Much of the "true-sigal" lives in a low dimensional subspace.
+
+    - Additive: add trainable layers or parameters to model. Adapters -> add a layer in Encoder or in Dsecoder, usually after the attention layer. Soft Prompts -> keeps architecture fixed, and plays with the input.
+
+        Prompt tuning is NOT prompt engineering!
     
