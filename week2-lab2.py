@@ -165,4 +165,189 @@ print(summary)
 # 3. Evaluate the Model Qualitatively - ROUGE Metric
 rouge = evaluate.load('rouge')
 
+# For this we have to compare several summaries, and then evaluate the outcome.
+dialogues = dataset['test'][0:10]['dialogue']
+human_baseline_summaries = dataset['test'][0:10]['summary']
 
+original_model_summaries = []
+instruct_model_summaries = []
+
+for _, dialogue in enumerate(dialogues):
+    prompt = f"""
+Summarize the following conversation.
+
+{dialogue}
+
+Summary: """
+    input_ids = tokenizer(prompt, return_tensors="pt").input_ids
+    original_model_outputs = original_model.generate(input_ids=input_ids, generation_config=GenerationConfig(max_new_tokens=200))
+    original_model_text_output = tokenizer.decode(original_model_outputs[0], skip_special_tokens=True)
+    # important: we take the first element of original_model_outputs[0] because the generate method of the model
+    # returns a batch of generated sequences, even if you only provided one input!
+    original_model_summaries.append(original_model_text_output)
+
+    instruct_model_outputs = model.generate(input_ids=input_ids, generation_config=GenerationConfig(max_new_tokens=200))
+    instruct_model_text_output = tokenizer.decode(instruct_model_outputs[0], skip_special_tokens=True)
+    instruct_model_summaries.append(instruct_model_text_output)
+
+zipped_summaries = list(zip(human_baseline_summaries, original_model_summaries, instruct_model_summaries))
+
+# to visualize the comparative better:
+df = pd.DataFrame(zipped_summaries, columns = ['human_baseline_summaries', 'original_model_summaries', 'instruct_model_summaries'])
+
+
+original_model_results = rouge.compute(
+    predictions=original_model_summaries,
+    references=human_baseline_summaries[0:len(original_model_summaries)],
+    use_aggregator=True,
+    use_stemmer=True,
+)
+
+instruct_model_results = rouge.compute(
+    predictions=instruct_model_summaries,
+    references=human_baseline_summaries[0:len(instruct_model_summaries)],
+    use_aggregator=True,
+    use_stemmer=True,
+)
+
+print('ORIGINAL MODEL:')
+print(original_model_results)
+print('INSTRUCT MODEL:')
+print(instruct_model_results)
+
+# Conclusion:
+# -----------------------------
+# Absolute percentage improvement of INSTRUCT MODEL over HUMAN BASELINE
+# rouge1: 18.82%
+# rouge2: 10.43%
+# rougeL: 13.70%
+# rougeLsum: 13.69%
+
+####################################################
+## Perform Parameter Efficient Fine-Tuning (PEFT) ##
+####################################################
+
+"""
+PEFT is a generic term that includes Low-Rank Adaptation (LoRA) and prompt tuning (which is NOT THE SAME as prompt engineering!).
+In most cases, when someone says PEFT, they typically mean LoRA. LoRA, at a very high level, allows the user to fine-tune their model
+using fewer compute resources (in some cases, a single GPU). After fine-tuning for a specific task, use case, or tenant with LoRA,
+the result is that the original LLM remains unchanged and a newly-trained “LoRA adapter” emerges.
+This LoRA adapter is much, much smaller than the original LLM - on the order of a single-digit % of the original LLM size (MBs vs GBs).
+
+That said, at inference time, the LoRA adapter needs to be reunited and combined with its original LLM to serve the inference request.
+The benefit, however, is that many LoRA adapters can re-use the original LLM which reduces overall memory requirements when serving multiple tasks and use cases.
+"""
+
+# 1. Setup the PEFT/LoRA model for Fine-tuning
+# We need a new layer/parameter adapter. Using PEFT/LoRA we are freezing the underlying LLM and only training the adapter.
+# The rank "r" hyper-parameter means: the dimension of the adapter to be trained.
+
+from peft import LoraConfig, get_peft_model, TaskType
+
+lora_config = LoraConfig(
+    r=32, # rank -> higher means more trainable parameters (potentially more capacity) but also more memory usage
+    lora_alpha=32, # scaling factor for the weights -> it balances the contribution of the adapter to the original weights (larger values, adapter's effect stronger)
+    target_modules=["q", "v"], # which modules in the model to apply LoRA to. "q": querry, "v": value, projection layers in the attention mechanism of the transformer.
+    lora_dropout=0.05, # to prevent overfitting
+    bias="none",
+    task_type=TaskType.SEQ_2_SEQ_LM # to let the model know what are we working with; FLAN-T5
+)
+
+# Now we are LoRA adapter to the original LLM to be trained:
+peft_model = get_peft_model(original_model, 
+                            lora_config)
+
+# if we extract the number of parameters of the model, and trainable ones:
+"""
+trainable model parameters: 3538944
+all model parameters: 251116800
+percentage of trainable model parameters: 1.41%
+
+This is because ONLY the adapter is trainable. The original model weights are frozen.
+"""
+# 3. Train PEFT adapter
+output_dir = f'./peft-dialogue-summary-training-{str(int(time.time()))}'
+
+peft_training_args = TrainingArguments(
+    output_dir=output_dir,
+    auto_find_batch_size=True,
+    learning_rate=1e-3, # Higher learning rate than full fine-tuning.
+    num_train_epochs=1,
+    logging_steps=1,
+    max_steps=1    
+)
+    
+peft_trainer = Trainer(
+    model=peft_model,
+    args=peft_training_args,
+    train_dataset=tokenized_datasets["train"],
+)
+
+peft_trainer.train() # we are training LoRA model with our dataset. It's way more efficient cause we update ~1% of the parameters
+
+# after the training, the adapter has "learned" how to adapt the base model to our specific summarization task
+
+peft_model_path="./peft-dialogue-summary-checkpoint-local"
+
+peft_trainer.model.save_pretrained(peft_model_path)
+tokenizer.save_pretrained(peft_model_path)
+
+# For using the model:
+# --------------------------
+from peft import PeftModel, PeftConfig
+
+model_base = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-base", torch_dtype=torch.bfloat16)
+tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-base")
+
+peft_model = PeftModel.from_pretrained(model_base, 
+                                       './peft-dialogue-summary-checkpoint-from-s3/', 
+                                       torch_dtype=torch.bfloat16,
+                                       is_trainable=False) # since we are now only gonna use the model, we don't need to carry parameters for training
+
+# 3. Evaluate the model quantitatively with ROUGE metric
+dialogues = dataset['test'][0:10]['dialogue']
+human_baseline_summaries = dataset['test'][0:10]['summary']
+
+original_model_summaries = []
+instruct_model_summaries = []
+peft_model_summaries = []
+
+for idx, dialogue in enumerate(dialogues):
+    prompt = f"""
+Summarize the following conversation.
+
+{dialogue}
+
+Summary: """
+    
+    input_ids = tokenizer(prompt, return_tensors="pt").input_ids
+
+    human_baseline_text_output = human_baseline_summaries[idx]
+
+    peft_model_outputs = peft_model.generate(input_ids=input_ids, generation_config=GenerationConfig(max_new_tokens=200))
+    peft_model_text_output = tokenizer.decode(peft_model_outputs[0], skip_special_tokens=True)
+
+    peft_model_summaries.append(peft_model_text_output)
+
+zipped_summaries = list(zip(human_baseline_summaries, original_model_summaries, instruct_model_summaries, peft_model_summaries))
+ 
+df = pd.DataFrame(zipped_summaries, columns = ['human_baseline_summaries', 'original_model_summaries', 'instruct_model_summaries', 'peft_model_summaries'])
+
+peft_model_results = rouge.compute(
+    predictions=peft_model_summaries,
+    references=human_baseline_summaries[0:len(peft_model_summaries)],
+    use_aggregator=True,
+    use_stemmer=True,
+)
+
+"""
+3 models evaluated:
+ORIGINAL MODEL:
+{'rouge1': 0.2127769756385947, 'rouge2': 0.07849999999999999, 'rougeL': 0.1803101433337705, 'rougeLsum': 0.1872151390166362}
+INSTRUCT MODEL:
+{'rouge1': 0.41026607717457186, 'rouge2': 0.17840645241958838, 'rougeL': 0.2977022096267017, 'rougeLsum': 0.2987374187518165}
+PEFT MODEL:
+{'rouge1': 0.3725351062275605, 'rouge2': 0.12138811933618107, 'rougeL': 0.27620639623170606, 'rougeLsum': 0.2758134870822362}
+
+Notice, that PEFT model results are not too bad, while the training process was much easier!!
+"""
